@@ -6,6 +6,7 @@ Table of content:
 
 - [Site reliability engineering](notes/sre.md)
 - [Linux](notes/linux.md)
+- [Postgres](notes/postgres.md)
 - [Probability theory](notes/prob.md)
 - [Algorithms](https://github.com/marselester/alg)
 - [Primitive types](#primitive-types)

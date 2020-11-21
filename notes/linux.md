@@ -96,6 +96,8 @@ Kernel exposes info about the system in /proc directory (pseudo-filesystem)
 where files' contents are created as files are read.
 Process-specific info is divided into dirs named by PID, e.g., /proc/1/ describes init.
 
+<details>
+
 | file    | contents
 | ---     | ---
 | cgroup  | control groups to which the process belongs
@@ -111,6 +113,8 @@ Process-specific info is divided into dirs named by PID, e.g., /proc/1/ describe
 | root    | symlink to the process's root dir (set with chroot)
 | stat    | general process status info (ps)
 | statm   | memory usage info
+
+</details>
 
 Process's memory consumption is usually shown in KB:
 
