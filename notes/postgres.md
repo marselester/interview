@@ -5,6 +5,7 @@ Table of content:
 - [Explain](#explain)
 - [Selectivity](#selectivity)
 - [Benchmark](#benchmark)
+- [Statistics](#statistics)
 
 References:
 
@@ -13,6 +14,8 @@ References:
 - [Why is my index not being used?](https://www.depesz.com/2010/09/09/why-is-my-index-not-being-used/) by Hubert Lubaczewski
 - [pgbench](https://www.postgresql.org/docs/current/pgbench.html)
 - [pg_buffercache](https://www.postgresql.org/docs/current/pgbuffercache.html)
+- [Statistics collector](https://www.postgresql.org/docs/current/monitoring-stats.html)
+- [pg_stat_statements](https://www.postgresql.org/docs/current/pgstatstatements.html)
 
 There are 100K users and ~20M jobs processed (failed/successful) within 180 days.
 A user on average has 100 jobs, but first ten users have 1M jobs each.
@@ -199,10 +202,10 @@ Index will not be used if:
 
 - table is too small (it's cheaper to do a Seq Scan)
 - a large percentage of rows is returned (low selectivity)
-- operations use functions, e.g., `created_at + '7 days'::INTERVAL < now()`.
-  It should be `created_at < now() - '7 days'::INTERVAL`.
-- there is a duplicate index
-- there is an intersecting indice
+- operations use functions, e.g., `created_at + '7 days'::interval < now()`.
+  It should be `created_at < now() - '7 days'::interval`.
+- there is a duplicate index ([how to find them](https://wiki.postgresql.org/wiki/Index_Maintenance#Duplicate_indexes))
+- there is an intersecting index
 
 ## Benchmark
 
@@ -706,3 +709,315 @@ in the buffer cache and doesn't need to often evict them.
 This behaviour should provide consistent query performance.
 
 ![Buffer cache usage on created_at, user_id index](images/pg_buffercache_created_at_user_id.png)
+
+## Statistics
+
+Statistics collector counts accesses to tables and indexes in disk-block and individual-row terms.
+It also tracks the total number of rows in each table, and information about vacuum and analyze actions for each table.
+
+Each process transmits new statistical counts to the collector just before going idle;
+so a query or transaction still in progress does not affect the displayed totals.
+The collector aggregates counts in memory and every 500 ms writes a report to disk.
+When a process needs to access a report, it first fetches the most recent one from disk and
+then continues to use this snapshot for all statistical views until the end of its current transaction.
+
+The per-index statistics are particularly useful to determine which indexes are being used (`idx_scan` should be positive)
+and how effective they are.
+The `pg_stat_all_indexes` view contains one row for each index, showing statistics about accesses to that specific index.
+
+| column        | description
+| ---           | ---
+| idx_scan      | 2,486 index scans initiated on this index
+| idx_tup_read  | 23,136,290 index tuples returned by scans on this index
+| idx_tup_fetch | 5,383 live tuples fetched by simple index scans using this index
+
+<details>
+
+```sql
+select * from pg_stat_all_indexes where relid='job'::regclass and indexrelname='job_created_at_user_id_idx' \gx
+-[ RECORD 1 ]-+---------------------------
+relid         | 32858
+indexrelid    | 32877
+schemaname    | public
+relname       | job
+indexrelname  | job_created_at_user_id_idx
+idx_scan      | 2486
+idx_tup_read  | 23136290
+idx_tup_fetch | 5383
+```
+
+</details>
+
+The `pg_statio_` views are primarily useful to determine the effectiveness of the buffer cache.
+When the number of actual disk reads is much smaller than the number of buffer hits,
+then the cache is satisfying most read requests without invoking a kernel call.
+Note, evicted buffers might still reside in the kernel's I/O cache and still be fetched without requiring a disk read.
+The `pg_statio_all_tables` view contains one row for each table (including TOAST tables),
+showing statistics about I/O on that specific table (how many pages were read/written):
+
+| column         | description
+| ---            | ---
+| heap_blks_read | 72,929,355 table pages read from disk
+| heap_blks_hit  | 205,749,371 table pages read from the buffer cache
+| idx_blks_read  | 482,699 index pages read from disk (in all indexes on this table)
+| idx_blks_hit   | 85,594,519 index pages read from the buffer cache (in all indexes on this table)
+
+~85.5M index pages were read from the buffer cache, and ~0.5M from disk.
+
+<details>
+
+```sql
+select * from pg_statio_all_tables where relid='job'::regclass \gx
+-[ RECORD 1 ]---+----------
+relid           | 32858
+schemaname      | public
+relname         | job
+heap_blks_read  | 72929355
+heap_blks_hit   | 205749371
+idx_blks_read   | 482699
+idx_blks_hit    | 85594519
+toast_blks_read | 0
+toast_blks_hit  | 0
+tidx_blks_read  | 0
+tidx_blks_hit   | 0
+```
+
+```python
+idx_blks_read = 482699.
+idx_blks_hit = 85594519.
+idx_blks_total = idx_blks_read + idx_blks_hit
+hit_percent = idx_blks_hit * 100 / idx_blks_total
+read_percent = 100 - hit_percent
+print('{hit:.2f}% index pages were read from the buffer cache, and {read:.2f}% from disk.'.format(hit=hit_percent, read=read_percent))
+# 99.44% index pages were read from the buffer cache, and 0.56% from disk.
+```
+
+</details>
+
+Row versions (tuples) accumulate and require clean up to prevent query perf loss (scans through dead tuples).
+If a table is frequently updated but not vacuumed often,
+the segment files grow in size and don't shrink,
+because vacuum doesn't change their structure (it only marks unused tuple space as usable again).
+The `pg_stat_all_tables` view contains one row for each table (including TOAST tables),
+showing statistics about accesses to that specific table (how many tuples were added/updated/deleted/read).
+
+| column              | description
+| ---                 | ---
+| seq_scan            | 163 sequential scans initiated on this table
+| idx_scan            | 2,489 index scans initiated on this table
+| n_tup_ins           | 19,944,472 tuples inserted
+| n_tup_upd           | 19,943,472 tuples updated (includes HOT updated rows)
+| n_tup_hot_upd       | 0 rows HOT updated (i.e., with no separate index update required)
+| n_tup_del           | 0 tuples deleted
+| n_live_tup          | estimated 19,831,034 live tuples
+| n_dead_tup          | estimated 0 dead tuples
+| n_mod_since_analyze | estimated 0 rows modified since this table was last analyzed
+| n_ins_since_vacuum  | estimated 0 rows inserted since this table was last vacuumed
+| last_vacuum         | last time at which this table was manually vacuumed (not counting `vacuum full`), i.e., `vacuum job`
+| vacuum_count        | this table has been manually vacuumed 0 times
+| last_autovacuum     | last time at which this table was vacuumed by the autovacuum process
+| autovacuum_count    | this table has been vacuumed 2 times by the autovacuum process
+| last_analyze        | last time at which this table was manually analyzed, i.e., `analyze job` updated data distribution stats
+| analyze_count       | this table has been manually analyzed 7 times
+| last_autoanalyze    | last time at which this table was analyzed by the autovacuum process
+| autoanalyze_count   | this table has been analyzed 1 time by the autovacuum process
+
+<details>
+
+```sql
+select * from pg_stat_all_tables where relid='job'::regclass \gx
+-[ RECORD 1 ]-------+------------------------------
+relid               | 32858
+schemaname          | public
+relname             | job
+seq_scan            | 163
+seq_tup_read        | 1595556760
+idx_scan            | 2489
+idx_tup_fetch       | 96339909
+n_tup_ins           | 19944472
+n_tup_upd           | 19943472
+n_tup_del           | 0
+n_tup_hot_upd       | 0
+n_live_tup          | 19831034
+n_dead_tup          | 0
+n_mod_since_analyze | 0
+n_ins_since_vacuum  | 0
+last_vacuum         |
+last_autovacuum     | 2020-11-19 18:46:26.130802+00
+last_analyze        | 2020-11-21 19:03:28.003276+00
+last_autoanalyze    | 2020-11-19 18:40:02.880983+00
+vacuum_count        | 0
+autovacuum_count    | 2
+analyze_count       | 7
+autoanalyze_count   | 1
+
+-- See how many dead tuples accumulated, when the tables were vacuumed
+-- and analyzed (optimizer should have fresh stats) by the autovacuum process.
+select relname, n_dead_tup, (now()-last_autovacuum) as last_autovacuum, (now()-last_autoanalyze) as last_autoanalyze
+from pg_stat_all_tables
+order by n_dead_tup desc;
+```
+
+</details>
+
+Write ahead log (WAL) is a stream of executed actions (16 MB segment files).
+Checkpointer process periodically writes all dirty pages on disk.
+This helps to keep the WAL size fairly small — old WAL segments can be deleted after a checkpoint.
+Checkpointer also writes recovery information into the control file (longer it takes to write, longer the recovery will be).
+Bgwriter (background writer) process writes dirty pages that will likely be evicted soon.
+Backend also writes dirty pages on disk if there are not enough buffers for a query.
+The `pg_stat_bgwriter` view shows who wrote dirty pages on disk.
+
+| column                | description
+| ---                   | ---
+| checkpoints_timed     | checkpointer was scheduled 937 times, i.e., every `checkpoint_timeout=5m` (should be ~15-30 minutes to reduce resources usage)
+| checkpoints_req       | checkpointer had to run 132 times outside of its schedule because WAL exceeded `max_wal_size=1GB` (rush hour)
+| checkpoint_write_time | total amount of time spent (1,741,333 ms) in the portion of checkpoint processing where files are written to disk
+| checkpoint_sync_time  | total amount of time spent (3,033 ms) in the portion of checkpoint processing where files are fsynced
+| buffers_checkpoint    | checkpointer wrote 343,244 pages on disk
+| buffers_clean         | bgwriter wrote 586,467 pages on disk
+| buffers_backend       | backends wrote 9,947,797 pages on disk
+| maxwritten_clean      | bgwriter stopped a cleaning scan 5,247 times because it had written too many buffers
+| buffers_backend_fsync | number of times a backend had to execute its own fsync call (normally the bgwriter handles those even when the backend does its own write)
+
+<details>
+
+```sql
+-- Call checkpoint to write dirty pages on disk.
+checkpoint;
+
+select * from pg_stat_bgwriter \gx
+-[ RECORD 1 ]---------+------------------------------
+checkpoints_timed     | 937
+checkpoints_req       | 132
+checkpoint_write_time | 1741333
+checkpoint_sync_time  | 3033
+buffers_checkpoint    | 343244
+buffers_clean         | 586467
+maxwritten_clean      | 5247
+buffers_backend       | 9947797
+buffers_backend_fsync | 0
+buffers_alloc         | 62375448
+stats_reset           | 2020-11-10 19:37:48.698163+00
+```
+
+</details>
+
+The `pg_stat_database` view contains one row for each database in the cluster, plus one for shared objects,
+showing database-wide statistics.
+
+| column         | description
+| ---            | ---
+| numbackends    | 1 backend is currently connected to this database
+| xact_commit    | 3,042,909 committed transactions
+| xact_rollback  | 171 transactions rolled back
+| blks_read      | 90,880,125 pages read from disk
+| blks_hit       | 1,419,538,822 pages read from the buffer cache
+| tup_returned   | 3,129,145,899 tuples returned by queries
+| tup_fetched    | 236,406,974 tuples fetched by queries
+| tup_inserted   | 330,560,604 tuples inserted by queries
+| tup_updated    | 19,943,622 tuples updated by queries
+| tup_deleted    | 536 tuples deleted by queries
+| conflicts      | 0 queries canceled due to conflicts with recovery
+| deadlocks      | 0 deadlocks detected
+| blk_read_time  | 3,401.737 ms spent reading data file blocks by backends
+| blk_write_time | 0.063 ms spent writing data file blocks by backends
+
+<details>
+
+```sql
+-- Enables timing of database I/O calls.
+-- I/O timing is displayed in pg_stat_database, pg_stat_statements, EXPLAIN (BUFFERS).
+alter system set track_io_timing=on;
+select pg_reload_conf();
+
+select * from pg_stat_database where datname='postgres' \gx
+-[ RECORD 1 ]---------+------------------------------
+datid                 | 12662
+datname               | postgres
+numbackends           | 1
+xact_commit           | 3042909
+xact_rollback         | 171
+blks_read             | 90880125
+blks_hit              | 1419538822
+tup_returned          | 3129145899
+tup_fetched           | 236406974
+tup_inserted          | 330560604
+tup_updated           | 19943622
+tup_deleted           | 536
+conflicts             | 0
+temp_files            | 100
+temp_bytes            | 26318205668
+deadlocks             | 0
+checksum_failures     | 0
+checksum_last_failure |
+blk_read_time         | 3401.737
+blk_write_time        | 0.063
+stats_reset           | 2020-11-10 19:44:15.749057+00
+```
+
+</details>
+
+The `pg_stat_statements` module tracks query planning/execution statistics.
+
+| column              | description
+| ---                 | ---
+| calls               | the query was executed 3,448 times
+| total_exec_time     | total time spent executing the query is 605,850 ms
+| min_exec_time       | the query took minimum 5.72 ms
+| max_exec_time       | the query took maximum 2,861.67 ms
+| mean_exec_time      | the query took 175.71 ms on average (total_exec_time / calls)
+| rows                | 19,424,242 rows (total number) retrieved or affected by executing the query 3,448 times
+| shared_blks_hit     | 8,243,230 index/table pages read (total number) from the buffer cache (61.33%)
+| shared_blks_read    | 5,197,533 index/table pages read (total number) from disk
+| shared_blks_dirtied | 0 buffers dirtied because of the query
+| shared_blks_written | 1 buffer was written
+| blk_read_time       | the query spent 233,343.9 ms (total time) reading blocks
+| blk_write_time      | the query spent 0.083852 ms (total time) writing blocks
+| non-disk (cpu)      | the query spent 372,506 ms (total time) using CPU (total_exec_time - blk_read_time - blk_write_time)
+
+<details>
+
+```sql
+select *, 100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) as hit_percent
+from pg_stat_statements
+order by total_exec_time desc limit 1 \gx
+-[ RECORD 1 ]-------+---------------------------------------------------
+userid              | 10
+dbid                | 12662
+queryid             | -3996610330858309613
+query               | select * from job                                 +
+                    | where user_id=$1 and created_at>=now()-interval $2+
+                    | order by created_at desc
+plans               | 0
+total_plan_time     | 0
+min_plan_time       | 0
+max_plan_time       | 0
+mean_plan_time      | 0
+stddev_plan_time    | 0
+calls               | 3448
+total_exec_time     | 605850.2305030001
+min_exec_time       | 5.721114999999999
+max_exec_time       | 2861.678023
+mean_exec_time      | 175.71062369576526
+stddev_exec_time    | 473.22153332402075
+rows                | 19424242
+shared_blks_hit     | 8243230
+shared_blks_read    | 5197533
+shared_blks_dirtied | 0
+shared_blks_written | 1
+local_blks_hit      | 0
+local_blks_read     | 0
+local_blks_dirtied  | 0
+local_blks_written  | 0
+temp_blks_read      | 0
+temp_blks_written   | 0
+blk_read_time       | 233343.90670400002
+blk_write_time      | 0.083852
+wal_records         | 0
+wal_fpi             | 0
+wal_bytes           | 0
+hit_percent         | 61.3300747881649278
+```
+
+</details>
