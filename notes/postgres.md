@@ -12,6 +12,7 @@ References:
 - [Explaining the unexplainable](https://www.depesz.com/tag/unexplainable/) by Hubert Lubaczewski
 - [Using explain](https://www.postgresql.org/docs/current/using-explain.html)
 - [Why is my index not being used?](https://www.depesz.com/2010/09/09/why-is-my-index-not-being-used/) by Hubert Lubaczewski
+- [pg_stats](https://www.postgresql.org/docs/current/view-pg-stats.html)
 - [pgbench](https://www.postgresql.org/docs/current/pgbench.html)
 - [pg_buffercache](https://www.postgresql.org/docs/current/pgbuffercache.html)
 - [Statistics collector](https://www.postgresql.org/docs/current/monitoring-stats.html)
@@ -206,6 +207,60 @@ Index will not be used if:
   It should be `created_at < now() - '7 days'::interval`.
 - there is a duplicate index ([how to find them](https://wiki.postgresql.org/wiki/Index_Maintenance#Duplicate_indexes))
 - there is an intersecting index
+
+The `pg_stats` view provides access to statistical data about the contents of the database.
+Entries are created by analyze and subsequently used by the query planner.
+
+| column            | description
+| ---               | ---
+| null_frac         | fraction of column entries that are null
+| avg_width         | average width (10 bytes) of column's entries
+| n_distinct        | estimated 2 distinct values (though there are 3 job statuses)
+| most_common_vals  | "successful" and "failed" are the most common jobs
+| most_common_freqs | "successful" jobs are the most frequent (0.99906665), "failed" are rare (0.00093333336)
+| correlation       | 0.9980408 indicates strong statistical correlation between physical and logical row ordering (index scan on the column will be estimated to be cheaper than when it is near zero, due to reduction of random access to the disk)
+
+Creating an index on status column would be ineffective/wasteful (134 MB) because 99.9% of jobs have "successful" status (low selectivity).
+Though partial index for pending/failed jobs should be efficient (high selectivity) and take less space (160 kB).
+
+<details>
+
+```sql
+select * from pg_stats where tablename='job' and attname='status' \gx
+-[ RECORD 1 ]----------+---------------------------
+schemaname             | public
+tablename              | job
+attname                | status
+inherited              | f
+null_frac              | 0
+avg_width              | 10
+n_distinct             | 2
+most_common_vals       | {successful,failed}
+most_common_freqs      | {0.99906665,0.00093333336}
+histogram_bounds       |
+correlation            | 0.9980408
+most_common_elems      |
+most_common_elem_freqs |
+elem_count_histogram   |
+
+create index on job (status) where status!='successful';
+
+select pg_size_pretty(pg_relation_size('job_status_idx'));
+ pg_size_pretty
+----------------
+ 160 kB
+
+explain analyze select * from job where status='pending' limit 10;
+QUERY PLAN
+----------
+ Limit  (cost=0.29..8.30 rows=1 width=42) (actual time=0.019..0.021 rows=10 loops=1)
+   ->  Index Scan using job_status_idx on job  (cost=0.29..8.30 rows=1 width=42) (actual time=0.018..0.019 rows=10 loops=1)
+         Index Cond: (status = 'pending'::text)
+ Planning Time: 0.054 ms
+ Execution Time: 0.031 ms
+```
+
+</details>
 
 ## Benchmark
 
