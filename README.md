@@ -6,6 +6,7 @@ Table of content:
 
 - [Site reliability engineering](notes/sre.md)
 - [Linux](notes/linux.md)
+- [Consistency](notes/consistency.md)
 - [Postgres](notes/postgres.md)
 - [Probability theory](notes/prob.md)
 - [Algorithms](https://github.com/marselester/alg)
