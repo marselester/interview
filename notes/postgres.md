@@ -5,6 +5,7 @@ Table of content:
 - [Explain](#explain)
 - [Selectivity](#selectivity)
 - [Benchmark](#benchmark)
+- [Partitioning](#partitioning)
 - [Statistics](#statistics)
 
 References:
@@ -15,6 +16,7 @@ References:
 - [pg_stats](https://www.postgresql.org/docs/current/view-pg-stats.html)
 - [pgbench](https://www.postgresql.org/docs/current/pgbench.html)
 - [pg_buffercache](https://www.postgresql.org/docs/current/pgbuffercache.html)
+- [Partitioning](https://www.postgresql.org/docs/current/ddl-partitioning.html)
 - [Statistics collector](https://www.postgresql.org/docs/current/monitoring-stats.html)
 - [pg_stat_statements](https://www.postgresql.org/docs/current/pgstatstatements.html)
 
@@ -764,6 +766,110 @@ in the buffer cache and doesn't need to often evict them.
 This behaviour should provide consistent query performance.
 
 ![Buffer cache usage on created_at, user_id index](images/pg_buffercache_created_at_user_id.png)
+
+## Partitioning
+
+Dividing jobs by their creation date should provide the following benefits:
+
+- improved query performance, e.g., frequently accessed rows (jobs created in last 7 days)
+  are located in the single partition.
+  Reduced index size makes it more likely that the heavily-used parts of the indexes fit in memory.
+- sequential scan on a partition might have better performance
+  compared to using an index and random access reads scattered across the whole table
+- seldom-used data can be migrated to cheaper and slower storage media
+
+The divided table jobp is called a partitioned table.
+All rows inserted into jobp will be routed to one of the partitions based on the value of created_at.
+Uniqueness is enforced in each partition individually.
+Creating an index on partitioned table automatically creates one index on each partition,
+and any partitions created/attached later will also contain the index.
+
+<details>
+
+```sql
+create table jobp (
+    id bigserial,
+    user_id bigint not null,
+    status text,
+    created_at timestamptz not null default current_timestamp,
+    processed_at timestamptz
+) partition by range (created_at);
+
+-- There should be 7 partitions (2020-06 .. 2020-12).
+select min(created_at), max(created_at) from job;
+              min              |              max
+-------------------------------+-------------------------------
+ 2020-06-07 16:47:12.180953+00 | 2020-12-04 16:48:52.674547+00
+
+-- June
+create table job_2020_6 partition of jobp (
+    primary key (id)
+) for values from ('2020-06-01') to ('2020-07-01');
+-- July
+create table job_2020_7 partition of jobp (
+    primary key (id)
+) for values from ('2020-07-01') to ('2020-08-01');
+-- August
+create table job_2020_8 partition of jobp (
+    primary key (id)
+) for values from ('2020-08-01') to ('2020-09-01');
+-- September
+create table job_2020_9 partition of jobp (
+    primary key (id)
+) for values from ('2020-09-01') to ('2020-10-01');
+-- October
+create table job_2020_10 partition of jobp (
+    primary key (id)
+) for values from ('2020-10-01') to ('2020-11-01');
+-- November
+create table job_2020_11 partition of jobp (
+    primary key (id)
+) for values from ('2020-11-01') to ('2020-12-01');
+-- December
+create table job_2020_12 partition of jobp (
+    primary key (id)
+) for values from ('2020-12-01') to ('2021-01-01');
+
+insert into jobp select * from job;
+```
+
+</details>
+
+The benchmark using `created_at, user_id` index showed 48.55 tps (previously 35.34 tps) with average latency 205.965 ms (previously 286.084 ms).
+Index on `user_id, created_at` yielded 180.38 tps with average latency 55.436 ms.
+
+Too many partitions can mean longer query planning times and higher memory consumption during both query planning and execution.
+For example, pending job lookup: 0.253 ms planning (previously 0.054 ms), 0.046 ms execution (previously 0.031 ms).
+
+<details>
+
+```sql
+create index on jobp (status) where status!='successful';
+
+explain analyze select * from jobp where status='pending' limit 10;
+QUERY PLAN
+----------
+ Limit  (cost=0.28..2.18 rows=10 width=42) (actual time=0.026..0.028 rows=10 loops=1)
+   ->  Append  (cost=0.28..176.26 rows=926 width=42) (actual time=0.025..0.027 rows=10 loops=1)
+         ->  Index Scan using job_2020_6_status_idx on job_2020_6 jobp_1  (cost=0.28..4.32 rows=1 width=42) (actual time=0.009..0.009 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_7_status_idx on job_2020_7 jobp_2  (cost=0.28..8.30 rows=1 width=42) (actual time=0.002..0.002 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_8_status_idx on job_2020_8 jobp_3  (cost=0.28..4.31 rows=1 width=42) (actual time=0.003..0.003 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_9_status_idx on job_2020_9 jobp_4  (cost=0.28..4.31 rows=1 width=42) (actual time=0.002..0.002 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_10_status_idx on job_2020_10 jobp_5  (cost=0.28..4.32 rows=1 width=42) (actual time=0.002..0.002 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_11_status_idx on job_2020_11 jobp_6  (cost=0.28..4.31 rows=1 width=42) (actual time=0.002..0.002 rows=0 loops=1)
+               Index Cond: (status = 'pending'::text)
+         ->  Index Scan using job_2020_12_status_idx on job_2020_12 jobp_7  (cost=0.28..141.77 rows=920 width=42) (actual time=0.006..0.007 rows=10 loops=1)
+               Index Cond: (status = 'pending'::text)
+ Planning Time: 0.253 ms
+ Execution Time: 0.046 ms
+```
+
+</details>
 
 ## Statistics
 
