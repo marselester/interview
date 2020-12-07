@@ -14,6 +14,7 @@ Table of content:
   - [Bitwise operation](notes/bits.md)
 - [Arrays](#arrays)
 - [Sorting](#sorting)
+- [Searching](#searching)
 - [Tests](#tests)
 - [Benchmarks](#benchmarks)
 
@@ -44,6 +45,13 @@ Sorting problems:
 
 - **[h-index](sorting/h_index.go)**
   — calculate h-index metric that measures both productivity and citation impact of a researcher
+
+## Searching
+
+Searching problems:
+
+- **[sum 2020](searching/sum2020.go)** (advent of code)
+  — find two/three numbers that add up to 2020
 
 ## Tests
 
