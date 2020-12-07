@@ -11,8 +11,16 @@ func TestInsertionsort(t *testing.T) {
 		input []float64
 		want  []float64
 	}{
-		"small": {
+		"n²-random": {
 			input: []float64{9, 4, 8, 3, 7},
+			want:  []float64{9, 8, 7, 4, 3},
+		},
+		"n²-reverse-order": {
+			input: []float64{7, 3, 8, 4, 9},
+			want:  []float64{9, 8, 7, 4, 3},
+		},
+		"linear-sorted": {
+			input: []float64{9, 8, 7, 4, 3},
 			want:  []float64{9, 8, 7, 4, 3},
 		},
 	}

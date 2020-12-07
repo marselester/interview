@@ -11,9 +11,17 @@ func TestQuicksort(t *testing.T) {
 		input []float64
 		want  []float64
 	}{
-		"small": {
+		"linearithmic-random": {
 			input: []float64{9, 4, 8, 3, 7},
 			want:  []float64{9, 8, 7, 4, 3},
+		},
+		"n²-sorted": {
+			input: []float64{9, 8, 7, 4, 3},
+			want:  []float64{9, 8, 7, 4, 3},
+		},
+		"n²-duplicates": {
+			input: []float64{9, 9, 7, 9, 9},
+			want:  []float64{9, 9, 9, 9, 7},
 		},
 	}
 

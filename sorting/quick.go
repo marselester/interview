@@ -1,7 +1,8 @@
 package sorting
 
-// Quicksort sorts a in descending order using quicksort algorithm (not stable, in place).
-// Running time is n log n in best/average case (random order, no duplicates),
+// Quicksort sorts a in descending order using quicksort algorithm
+// (not stable, in-place, extra space log n due to recursion).
+// Running time is n log n on average case (random order, no duplicates),
 // and n² in worst (already sorted or has many duplicates).
 // Note, 3-way quicksort (partition by <, =, >) works well with duplicates (Dutch flag problem).
 //

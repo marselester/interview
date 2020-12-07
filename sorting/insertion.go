@@ -1,7 +1,7 @@
 package sorting
 
 /*
-Insertionsort sorts a in descending order using insertion sort algorithm (stable, in place).
+Insertionsort sorts a in descending order using insertion sort algorithm (stable, in-place).
 The idea is to examine elements from i=1 till the end and
 go backwards on each iteration to swap neighbors if sorting condition has changed.
 
