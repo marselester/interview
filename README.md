@@ -13,6 +13,7 @@ Table of content:
 - [Primitive types](#primitive-types)
   - [Bitwise operation](notes/bits.md)
 - [Arrays](#arrays)
+- [Linked lists](#linked-lists)
 - [Sorting](#sorting)
 - [Searching](#searching)
 - [Tests](#tests)
@@ -38,6 +39,12 @@ Array problems:
 - **[Dutch flag](array/dutch_flag.go)**
   — reorder an array of integers so that integers smaller than pivot appear first,
     then integers that equal to pivot, and finally integers larger than pivot
+
+## Linked lists
+
+Linked list problems:
+
+- **[reverse](linkedlist/reverse.go)**
 
 ## Sorting
 
