@@ -8,6 +8,8 @@ Table of content:
   - [Medical test problem](#medical-test-problem)
   - [Taxi problem](#taxi-problem)
 - [Counting](#counting)
+- [Binomial distribution](#binomial-distribution)
+- [Normal distribution](#normal-distribution)
 
 References:
 
@@ -324,3 +326,49 @@ n C r = 3! / (1! * 2!) = 3
 // Out of n=1 letters choose r=1 to place letter M.
 n C r = 1! / 1! = 1
 ```
+
+## Binomial distribution
+
+The binomial distribution is discrete (histogram-like): probability of a specific value.
+
+> On 1 face of each die there's a picture of a skull; the other 5 faces are all blank.
+> If I roll all 20 dice, what's the probability that I'll get exactly 4 skulls?
+
+Probability of rolling r=4 skulls out of n=20 times is 0.2 (20%),
+assuming probability of a single die is p=1/6.
+
+Formula for binomial distribution.
+
+```
+// 4 out of 20 combinations multiplied by
+// probability of 4 skulls multiplied by
+// probability of 16 non-skulls.
+P(r | p,n) = n! / ((n - r)! * r!) * p**r * (1-p)**(n-r)
+P(r | p,n) = 20! / (16! * 4!) * 1/6**4 * (1-1/6)**16 = 0.2022
+```
+
+On a histogram the binomial distribution with size n=20 (horizontal axis),
+each bar depicts the probability of one specific outcome (vertical axis).
+The heights of the bars sum to 1.
+
+## Normal distribution
+
+The normal distribution is continuous (smooth curve):
+probability that the value lies within a particular range of values
+(calculate the area under the curve).
+
+The horizontal axis corresponds to the value of some variable (e.g., temperature),
+and the vertical axis is probability density (how likely we are to observe that temperature).
+
+A normal distribution is described with two parameters,
+the mean (index of central tendency) and the standard deviation.
+The standard deviation is a measure of variance.
+When it is large, the values are not clustered around the mean (great variance from the mean).
+
+The area under the curve for the normal distribution must equal 1.
+68.3% of the area falls within one standard deviation of the mean,
+95.4% — two standard deviations.
+
+If mean is changed from 0 to 5, the bell curve shifts from left to right.
+If standard deviation is increased, the peak of the distribution stays in the same place,
+but the distribution gets wider.
