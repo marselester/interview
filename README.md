@@ -5,6 +5,7 @@ Interview notes and Go implementation of a few problems from Elements of Program
 Table of content:
 
 - [Site reliability engineering](notes/sre.md)
+- [Systems performance](notes/sysperf.md)
 - [Linux](notes/linux.md)
 - [Consistency](notes/consistency.md)
 - [Postgres](notes/postgres.md)
